@@ -232,7 +232,7 @@ void setup() {
     delay(200);
   }
 
-  voltage = floor((analogRead(VOLT_PIN) * 0.259)-8);
+  voltage = floor((analogRead(VOLT_PIN) * VOLTAGE_DIVIDER));
 }
 
 void loop() {
@@ -381,7 +381,7 @@ void loop() {
     //only when not revving to prevent low readings due to sag
     if (millis() % BATTFREQ == 0 && !revved) {
       updateDisplay = true;
-      voltage = floor((analogRead(VOLT_PIN) * 0.259)-8);
+      voltage = floor((analogRead(VOLT_PIN) * VOLTAGE_DIVIDER));
     }
 
     //write the display buffer if flag is set & only when not revving or if live ammo count is requested
