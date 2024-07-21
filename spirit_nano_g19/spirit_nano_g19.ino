@@ -193,7 +193,6 @@ void setup() {
 
   //startup animation
   uView.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  uView.setRotation(2);
   uView.setCursor(0, 0);
   uView.setTextColor(1);
   uView.setTextSize(2);
