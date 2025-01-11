@@ -1,0 +1,5 @@
+I know it's confusing, but the main branch here is Spirit + rev trigger code. 
+
+G19 conversion is for existing (neutron based) g19's to convert to spririt based firmware
+G19H is for G19H (meaning the PCB or spirit wiring)
+Ophidian is for ophidian
