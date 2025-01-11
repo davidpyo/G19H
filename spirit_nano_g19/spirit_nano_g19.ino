@@ -189,7 +189,7 @@ void setup() {
   menu.longClickTime = 1500;  //how long to wait before switching to settings mode when menu button held
   trig.multiclickTime = 0;
   menu.multiclickTime = 0;
-  rev.debounceTime = 0;
+  rev.multiclickTime = 0;
 
   //startup animation
   uView.begin(SSD1306_SWITCHCAPVCC, 0x3C);
