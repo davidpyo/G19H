@@ -1,3 +1,5 @@
+To build: go to your Documents folder, C:\Users\USERNAME\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts and replace the font file with the one included in this repo
+
 I know it's confusing, but the main branch here is Spirit + rev trigger code. 
 
 G19 conversion is for existing (neutron based) g19's to convert to spririt based firmware
