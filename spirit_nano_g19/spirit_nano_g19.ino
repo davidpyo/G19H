@@ -154,6 +154,7 @@ unsigned long spinDownTimer = 0;      //counts up while the flywheels are spinni
 unsigned long lastRevTime = 0;        //stores timestamp of last revved
 unsigned long safetyTimer = 0;        //counts up while revving for safety shutoff
 unsigned long rampTime = 0;           //stores timestamp of last trigger pull in Ramping mode
+unsigned long revTime = 0;
 float voltage = 0.0;                  //numerical voltage
 
 //tach stuff
@@ -516,6 +517,7 @@ void spinOn() {
         }
         goodTachCount = 0;
       } else {
+        revTime = millis() - lastTriggerDown;
         revved = true;  //say it's ready to fire, close everything out so it'll go to the fire control code
         disableTachInterrupts();
         spinDownTimer = millis();
@@ -581,8 +583,8 @@ void displayMain() {
     if (shotCount > 99) {
       countH -= 14;
     }
-    uView.setCursor(countH, 48);
-    uView.print(shotCount);
+    uView.setCursor(22, 48);
+    uView.print(revTime);
   } else {
     uView.setCursor(0, 26);
     uView.print(F("BATTERY\n CRITICAL!"));
