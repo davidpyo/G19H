@@ -126,7 +126,7 @@ Adafruit_SSD1306 uView(128, 64);  //display
 const long HIGHPOWER = MINRPM + (FIVEPERCENT * 15);  //target RPM hi power (15*5 = 75%)
 const long MIDPOWER = MINRPM + (FIVEPERCENT * 11);   //target RPM med power (11*5 = 55%)
 const long LOWPOWER = MINRPM + (FIVEPERCENT * 7);    //target RPM low power (7*5 = 35%)
-const byte singleShotPulse = 35;                     //power pulse time for solenoid
+const byte singleShotPulse = 25;                     //power pulse time for solenoid
 const bool batteryPicture = true;                 //battery display mode
 const bool liveAmmoCounter = false;                  //when true, ammo counter will update after every shot. reduces fire rate when enabled due to display being slow
 
