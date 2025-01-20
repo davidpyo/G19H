@@ -9,6 +9,7 @@
 #include <Adafruit_SSD1306.h>
 #include <Servo.h>
 #include <Fonts/FreeSansBoldOblique24pt7b.h>
+#include <EEPROM.h>
 
 #define VOLT_PIN A0
 #define TACH_PIN_0 2
@@ -46,6 +47,8 @@
 #define BINARY 4
 #define DEVOTION 5
 #define RAMPING 6
+#define EEPROMADDR 0 //the address of the write level wearing for EEPROM. Do not change this unless you really know what this does
+#define EEPROMWEAR 90000 //when the EEPROM struct location should be iterated so that we avoid memory EEPROM dying
 
 //startup splash bitmap
 const unsigned char splash[] PROGMEM = {
@@ -116,6 +119,15 @@ const unsigned char splash[] PROGMEM = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+struct settingStruct {
+  byte throttle;          //throttle EEPROM
+  byte burstCount;        //how many shots to fire in burst mode EEPROM
+  byte fireRate;          //firerate EEPROM
+  unsigned short spinDownTime; //how long to wait before powering off flywheels after firing EEPROM
+  unsigned int writeWear;
+}
+
+settingStruct settings { };
 Servo esc;                                         //ESC object
 ClickButton trig(TRIG_PIN, LOW, CLICKBTN_PULLUP);  //trigger button
 ClickButton rev(REV_PIN, LOW, CLICKBTN_PULLUP);    //rev button
@@ -132,21 +144,19 @@ const bool liveAmmoCounter = false;                  //when true, ammo counter w
 
 long targetRPM = HIGHPOWER;           //target RPM value
 byte singleShotDelay = MAXROFDELAY;  //how long to wait after powering solenoid before it can be powered again
-byte mode = SEMI;                     //fire mode
-byte burstCount = 3;                  //how many shots to fire in burst mode
-unsigned short spinDownTime = 500;    //how long to wait before powering off flywheels after firing
+byte mode = SEMI;                     //fire mode                    
 
 unsigned short shotCount = 0;         //fired counter
 byte devotionCount = 0;               //devotion mode fired counter
 byte rampCount = 0;                   //ramping mode fired counter
 byte selected = 1;                    //menu selection
 bool revved = false;                  //flywheels spun up?
-bool settings = false;                //in settings mode?
+bool settingsMode = false;                //in settings mode?
 bool idle = false;                    //flywheels pre-rev/idle? (tournament mode)
 bool fired = false;                   //shot was fired? prevent additional shots until trigger reset (for all non fully-automatic fire modes)
 bool ramp = false;                    //ramped to full auto? (ramping mode)
 bool lock = false;                    //mode locked? when true, fire mode cannot be changed
-bool tourney = false;                 //when true, restrict available fire modes for competitive play
+bool tourney;                         //when true, restrict available fire modes for competitive play
 bool lowBatt = false;                 //when true, low battery condition has been tripped. lock blaster for recharge
 bool updateDisplay = true;            //when true, write display buffer to screen in the next loop
 unsigned long spinDownTimer = 0;      //counts up while the flywheels are spinning down
@@ -201,22 +211,31 @@ void setup() {
   uView.drawBitmap(0, 0, splash, 128, 64, 1);
   uView.setCursor(8, 40);
 
-  String str = "High Power";
-  if (digitalRead(MENU_PIN) == LOW) {
-    targetRPM = LOWPOWER;
-    str = "Low  Power";
+  String str = "EEPROM BOOT";
+  byte eeWear = EEPROM.read(EEPROMADDR)
+  unsigned int addr = eeWear * (sizeof(settingStruct)) + 1;
+  EEPROM.get(addr, settings);
+  if(settings.writeWear > EEPROMWEAR){          //if writecyles greater than wear limit, move the EEPROM struct location
+    eeWear++;
+    EEPROM.write(EEMPROMADDR, eeWear);
+    addr = eeWear * (sizeof(settingStruct)) + 1; //calculate the new address, eventually this could overflow but if you get to that point I'd be suprised
+    settings.writeWear = 1;                      //reset write wear for new eeprom address, keep all other settings
+    EEPROM.put(addr, settings);
   }
+  if (digitalRead(MENU_PIN) == LOW) && digitalRead(TRIG_PIN) == LOW) {
+    str = "EEPROM RST";
+    settings.throttle = map(HIGHRPM, MINRPM, MAXRPM, 0, 100);         
+    settings.burstCount = 3;       
+    settings.fireRate = singleShotDelay + singleShotPulse;
+    settings.spinDownTime = 500;
+    settings.writeWear += 1;
+    EEPROM.put(addr, settings);
+  } 
   if (digitalRead(TRIG_PIN) == LOW) {
-    if (targetRPM == HIGHPOWER) {
-      targetRPM = MIDPOWER;
-      str = "Mid  Power";
-    } else {
-      targetRPM = HIGHPOWER;
-      menu.longClickTime = 500;
-      str = "Tournament";
-      tourney = true;
-      idle = true;
-    }
+    menu.longClickTime = 500;
+    str = "Tournament";
+    tourney = true;
+    idle = true;
   }
 
   uView.print(str);
@@ -253,13 +272,13 @@ void loop() {
     if (!tourney) {
       if (menu.clicks < 0) {
         updateDisplay = true;
-        settings = !settings;
+        settingsMode = !settingsMode;
         menu.clicks = 0;
         //update target RPM in case it was changed on settings screen
-        if (!settings) {
+        if (!settingsMode) {
           updateSpeed(targetRPM, 10);
         }
-      } else if (menu.clicks > 0 && !settings && !lock) {
+      } else if (menu.clicks > 0 && !settingsMode && !lock) {
         updateDisplay = true;
         mode++;
 
@@ -287,7 +306,7 @@ void loop() {
 
   //trigger button handling
   //if not in settings mode, while trigger is pressed, spin up the flywheels and fire
-  if (!settings) {
+  if (!settingsMode) {
 
     if (rev.depressed) {
         spinOn();
