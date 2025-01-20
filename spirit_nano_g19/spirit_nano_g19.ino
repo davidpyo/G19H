@@ -122,12 +122,12 @@ const unsigned char splash[] PROGMEM = {
 struct settingStruct {
   byte throttle;          //throttle EEPROM
   byte burstCount;        //how many shots to fire in burst mode EEPROM
-  byte fireRate;          //firerate EEPROM
+  byte singleShotDelay;          //how long to wait after powering solenoid before it can be powered again EEPROM
   unsigned short spinDownTime; //how long to wait before powering off flywheels after firing EEPROM
   unsigned int writeWear;
-}
+};
 
-settingStruct settings { };
+settingStruct settings = {0,0,0,0,0 }; // dummy values, these get replaced by values from EEPROM anyways
 Servo esc;                                         //ESC object
 ClickButton trig(TRIG_PIN, LOW, CLICKBTN_PULLUP);  //trigger button
 ClickButton rev(REV_PIN, LOW, CLICKBTN_PULLUP);    //rev button
@@ -143,7 +143,6 @@ const bool batteryPicture = true;                 //battery display mode
 const bool liveAmmoCounter = false;                  //when true, ammo counter will update after every shot. reduces fire rate when enabled due to display being slow
 
 long targetRPM = HIGHPOWER;           //target RPM value
-byte singleShotDelay = MAXROFDELAY;  //how long to wait after powering solenoid before it can be powered again
 byte mode = SEMI;                     //fire mode                    
 
 unsigned short shotCount = 0;         //fired counter
@@ -212,21 +211,23 @@ void setup() {
   uView.setCursor(8, 40);
 
   String str = "EEPROM BOOT";
-  byte eeWear = EEPROM.read(EEPROMADDR)
+  byte eeWear = EEPROM.read(EEPROMADDR);
   unsigned int addr = eeWear * (sizeof(settingStruct)) + 1;
   EEPROM.get(addr, settings);
+  targetRPM = map(settings.throttle, 0, 100, MINRPM, MAXRPM); 
   if(settings.writeWear > EEPROMWEAR){          //if writecyles greater than wear limit, move the EEPROM struct location
     eeWear++;
-    EEPROM.write(EEMPROMADDR, eeWear);
+    EEPROM.write(EEPROMADDR, eeWear);
     addr = eeWear * (sizeof(settingStruct)) + 1; //calculate the new address, eventually this could overflow but if you get to that point I'd be suprised
     settings.writeWear = 1;                      //reset write wear for new eeprom address, keep all other settings
     EEPROM.put(addr, settings);
   }
-  if (digitalRead(MENU_PIN) == LOW) && digitalRead(TRIG_PIN) == LOW) {
+  // 
+  if ((digitalRead(MENU_PIN) == LOW) && (digitalRead(TRIG_PIN) == LOW)) {
     str = "EEPROM RST";
-    settings.throttle = map(HIGHRPM, MINRPM, MAXRPM, 0, 100);         
+    settings.throttle = map(HIGHPOWER, MINRPM, MAXRPM, 0, 100);         
     settings.burstCount = 3;       
-    settings.fireRate = singleShotDelay + singleShotPulse;
+    settings.singleShotDelay = MAXROFDELAY;
     settings.spinDownTime = 500;
     settings.writeWear += 1;
     EEPROM.put(addr, settings);
@@ -278,6 +279,16 @@ void loop() {
         if (!settingsMode) {
           updateSpeed(targetRPM, 10);
         }
+        //if EEPROM settings changed, rewrite to the settings
+        byte eeWear = EEPROM.read(EEPROMADDR);
+        unsigned int addr = eeWear * (sizeof(settingStruct)) + 1;
+        settingStruct tempSettings;
+        EEPROM.get(addr, tempSettings);
+        if((settings.burstCount != tempSettings.burstCount) || (settings.singleShotDelay != tempSettings.singleShotDelay) || (settings.spinDownTime != tempSettings.spinDownTime) || (settings.throttle != tempSettings.throttle)){
+          settings.writeWear++;
+          EEPROM.put(addr, settings);
+        }
+
       } else if (menu.clicks > 0 && !settingsMode && !lock) {
         updateDisplay = true;
         mode++;
@@ -333,7 +344,7 @@ void loop() {
           case BURST:
             if (!fired) {
               //fireOnce executes burstCount times, firing a burst of burstCount darts
-              for (byte k = 0; k < burstCount; k++) {
+              for (byte k = 0; k < settings.burstCount; k++) {
                 fireOnce();
               }
               fired = true;
@@ -431,21 +442,21 @@ void loop() {
           }
           break;
         case 2:
-          burstCount++;
-          if (burstCount > 10) {
-            burstCount = 2;
+          settings.burstCount++;
+          if (settings.burstCount > 10) {
+            settings.burstCount = 2;
           }
           break;
         case 3:
-          singleShotDelay -= 10;
-          if (singleShotDelay < MAXROFDELAY) {
-            singleShotDelay = MINROFDELAY;
+          settings.singleShotDelay -= 10;
+          if (settings.singleShotDelay < MAXROFDELAY) {
+            settings.singleShotDelay = MINROFDELAY;
           }
           break;
         case 4:
-          spinDownTime += 100;
-          if (spinDownTime > 2000) {
-            spinDownTime = 0;
+          settings.spinDownTime += 100;
+          if (settings.spinDownTime > 2000) {
+            settings.spinDownTime = 0;
           }
           break;
       }
@@ -468,7 +479,7 @@ void fireOnce() {
   digitalWrite(SOLENOID_PIN, LOW);
   if (mode != DEVOTION) {
     //reduce delay to minimum when in binary, semi, or ramping for best trigger response
-    delay((mode == BINARY || mode == SEMI || (mode == RAMPING && !ramp)) ? MAXROFDELAY : singleShotDelay);
+    delay((mode == BINARY || mode == SEMI || (mode == RAMPING && !ramp)) ? MAXROFDELAY : settings.singleShotDelay);
   } else {
     if (devotionCount >= 10) {
       delay(MAXROFDELAY);  //clamp to max ROF after 10 shots
@@ -545,7 +556,7 @@ void spinOn() {
 
 //cut power to the flywheels, but only after a set time
 void spinOff() {
-  if (millis() - spinDownTimer >= spinDownTime) {
+  if (millis() - spinDownTimer >= settings.spinDownTime) {
     //if in tournament mode and flywheel speed is not at idle RPM, set flywheel speed to idle RPM
     if (tourney && !idle) {
       idle = true;
@@ -567,7 +578,7 @@ void spinOff() {
 
 //main (firing) screen display output
 void displayMain() {
-  byte throttle = map(targetRPM, MINRPM, MAXRPM, 0, 100);
+  settings.throttle = map(targetRPM, MINRPM, MAXRPM, 0, 100);
   byte countH = 60;
   uView.clearDisplay();
   uView.setTextSize(1);
@@ -606,17 +617,15 @@ void displayMain() {
   countH = 117;
   uView.setFont();
   uView.drawFastHLine(0, 54, 128, 1);
-  if (lowBatt) {
-    throttle = 0;
-  }
-  if (throttle > 9) {
+
+  if (settings.throttle > 9) {
     countH -= 6;
   }
-  if (throttle > 99) {
+  if (settings.throttle > 99) {
     countH -= 6;
   }
   uView.setCursor(countH, 57);
-  uView.print(throttle);
+  uView.print(settings.throttle);
   uView.print(F("%"));
   uView.setCursor(0, 57);
 
@@ -661,8 +670,8 @@ void displaySettings(byte selected) {
   t %= 60;
   byte seconds = t;
 
-  byte throttle = map(targetRPM, MINRPM, MAXRPM, 0, 100);
-  byte fireRate = singleShotDelay + singleShotPulse;
+  settings.throttle = map(targetRPM, MINRPM, MAXRPM, 0, 100);
+  byte fireRate = settings.singleShotDelay + singleShotPulse;
 
   uView.clearDisplay();
   uView.setCursor(0, 0);
@@ -685,7 +694,7 @@ void displaySettings(byte selected) {
   if (selected == 1) {
     uView.setTextColor(0, 1);
   }
-  uView.print(throttle);
+  uView.print(settings.throttle);
   uView.setTextColor(1, 0);
   uView.setCursor(0, 25);
   uView.print(F("Burst Count: "));
@@ -693,7 +702,7 @@ void displaySettings(byte selected) {
   if (selected == 2) {
     uView.setTextColor(0, 1);
   }
-  uView.print(burstCount);
+  uView.print(settings.burstCount);
   uView.setTextColor(1, 0);
   uView.setCursor(0, 39);
   uView.print(F("Fire Rate (ms): "));
@@ -709,7 +718,7 @@ void displaySettings(byte selected) {
   if (selected == 4) {
     uView.setTextColor(0, 1);
   }
-  uView.print(spinDownTime);
+  uView.print(settings.spinDownTime);
   uView.setTextColor(1, 0);
   uView.display();
 }
