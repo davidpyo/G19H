@@ -11,6 +11,8 @@
 #include <Fonts/FreeSansBoldOblique24pt7b.h>
 #include <EEPROM.h>
 
+#define EEPROMOFFSET 0 //add 24 to this value if your EEPROM starts acting funky. max 1000
+
 const byte VOLT_PIN = A0;
 const byte TACH_PIN_0 = 2;
 const byte TACH_PIN_1 = 3;
@@ -137,9 +139,9 @@ struct Profile {
 };
 
 const Profile DEFAULT_PROFILES[4] PROGMEM = {
-  { LOWPOWER, 3, 8, 500 },                 // Low
-  { MIDPOWER, 3, 10, 500 },                // Medium
-  { HIGHPOWER, 3, 12, 500 },               // High
+  { HIGHPOWER, 3, 12, 500 },                 // Idle
+  { HIGHPOWER, 3, 12, 500 },                // Profile2
+  { HIGHPOWER, 3, 12, 500 },               //  Default
   { HIGHPOWER + FIVEPERCENT, 3, 12, 500 }  // Tournament
 };
 
@@ -163,7 +165,8 @@ byte rampCount = 0;               //ramping mode fired counter
 byte selected = 1;                //menu selection
 bool revved = false;              //flywheels spun up?
 bool settings = false;            //in settings mode?
-bool idle = false;                //flywheels pre-rev/idle? (tournament mode)
+bool idling = false;              //flywheels idling (state)?
+bool idle = false;                //idle mode
 bool fired = false;               //shot was fired? prevent additional shots until trigger reset (for all non fully-automatic fire modes)
 bool ramp = false;                //ramped to full auto? (ramping mode)
 bool lock = false;                //mode locked? when true, fire mode cannot be changed
@@ -193,15 +196,15 @@ volatile boolean drive0TachValid = false;
 volatile boolean drive1TachValid = false;
 
 void loadProfile(byte profile) {
-  if (EEPROM.read(profile * sizeof(Profile)) == 0xFF) {
+  if (EEPROM.read(profile * sizeof(Profile) + EEPROMOFFSET) == 0xFF) {
     Profile defaultProfile;
     memcpy_P(&defaultProfile, &DEFAULT_PROFILES[profile], sizeof(Profile));
-    EEPROM.put(profile * sizeof(Profile), defaultProfile);
+    EEPROM.put(profile * sizeof(Profile) + EEPROMOFFSET, defaultProfile);
   }
 
   // Load profile from EEPROM
   Profile loadedProfile;
-  EEPROM.get(profile * sizeof(Profile), loadedProfile);
+  EEPROM.get(profile * sizeof(Profile) + EEPROMOFFSET, loadedProfile);
 
   // Apply settings
   targetRPM = loadedProfile.targetRPM;
@@ -217,7 +220,7 @@ void saveCurrentProfile() {
     fireRate,
     spinDownTime
   };
-  EEPROM.put(currentProfile * sizeof(Profile), currentSettings);
+  EEPROM.put(currentProfile * sizeof(Profile) + EEPROMOFFSET, currentSettings);
 }
 
 void setup() {
@@ -249,16 +252,17 @@ void setup() {
   uView.drawBitmap(0, 0, splash, 128, 64, 1);
   uView.setCursor(8, 40);
 
-  String str = "High Power";
+  String str = "Profile 1";
   currentProfile = PROFILE_HIGH;
   if (digitalRead(MENU_PIN) == LOW) {
     currentProfile = PROFILE_LOW;
-    str = "Low  Power";
+    str = "Idle Pro";
+    idle = true;
   }
   if (digitalRead(TRIG_PIN) == LOW) {
     if (currentProfile == PROFILE_HIGH) {
       currentProfile = PROFILE_MED;
-      str = "Mid  Power";
+      str = "Profile 2";
     } else {
       currentProfile = PROFILE_T;
       menu.longClickTime = 500;
@@ -273,11 +277,12 @@ void setup() {
   uView.print(str);
   uView.display();
   uView.clearDisplay();
+  delay(1000);
 
   //initialize ESCs
   esc.attach(ESC_PIN, OFF, FULL);
   esc.writeMicroseconds(OFF);
-  updateSpeed(tourney ? MINRPM : targetRPM, 10);
+  updateSpeed(idle ? MINRPM : targetRPM, 10);
 
   voltage = floor((analogRead(VOLT_PIN) * VOLTAGE_DIVIDER));
 }
@@ -305,8 +310,10 @@ void loop() {
         menu.clicks = 0;
         //update target RPM in case it was changed on settings screen
         if (!settings) {
+          idling = false; //reset this
           saveCurrentProfile();
           updateSpeed(targetRPM, 10);
+          spinOff();
         }
       } else if (menu.clicks > 0 && !settings && !lock) {
         updateDisplay = true;
@@ -341,8 +348,8 @@ void loop() {
     if(rev.depressed){
       spinOn();
     } else {
-      //if in tourney mode and flywheel speed set to idle RPM, spin up the flywheels for pre-rev
-      if (tourney && idle) {
+      //if in idle mode and flywheel speed set to idle RPM, spin up the flywheels for pre-rev
+      if (idle && idling) {
         esc.writeMicroseconds(FULL);
       }
     }
@@ -478,7 +485,7 @@ void loop() {
         spinDownTime = defaultProfile.spinDownTime;
 
         // Save to EEPROM
-        EEPROM.put(currentProfile * sizeof(Profile), defaultProfile);
+        EEPROM.put(currentProfile * sizeof(Profile) + EEPROMOFFSET, defaultProfile);
 
         // Visual feedback
         uView.clearDisplay();
@@ -565,9 +572,9 @@ void fire(byte shots) {
 
 //spin up the flywheels, delay activities for set period to allow flywheels to accelerate. reset the spin down timer (thanks snakerbot!)
 void spinOn() {
-  //if in tourney mode and flywheel speed set to idle RPM, first update the targetRPM to the actual RPM
-  if (tourney && idle) {
-    idle = false;
+  //if in idle mode and flywheel speed set to idle RPM, first update the targetRPM to the actual RPM
+  if (idle && idling) {
+    idling = false;
     updateSpeed(targetRPM, 1);
   }
   if (!revved) {
@@ -631,14 +638,14 @@ void spinOn() {
 
 //cut power to the flywheels
 void spinOff() {
-  //if in tournament mode and flywheel speed is not at idle RPM, set flywheel speed to idle RPM
-  if (tourney && !idle) {
-    idle = true;
+  //if in idle mode and flywheel speed is not at idle RPM, set flywheel speed to idle RPM
+  if (idle && !idling) {
+    idling = true;
     updateSpeed(MINRPM, 1);
-  }
-  //only if not in tournament mode, shut off the flywheels
-  if (!tourney) {
-    esc.writeMicroseconds(OFF);
+  } else { //only if not in idle mode, shut off the flywheels
+    if(!idle){
+      esc.writeMicroseconds(OFF);
+    }
   }
   revved = false;
   lastRevTime = millis();
