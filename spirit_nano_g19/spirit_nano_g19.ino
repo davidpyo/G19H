@@ -39,7 +39,7 @@ const unsigned int MAXRPM = 40000;
 const unsigned int MINRPM = 5000;
 const unsigned int FIVEPERCENT = 1750;
 
-const byte MAXFIRERATE = 16;
+const byte MAXFIRERATE = 14;
 const byte MINFIRERATE = 4;
 const byte MAXROFDELAY = 35;
 
@@ -123,7 +123,7 @@ const unsigned char splash[] PROGMEM = {
 const unsigned int HIGHPOWER = MINRPM + (FIVEPERCENT * 15);  //target RPM hi power (15*5 = 75%)
 const unsigned int MIDPOWER = MINRPM + (FIVEPERCENT * 11);   //target RPM med power (11*5 = 55%)
 const unsigned int LOWPOWER = MINRPM + (FIVEPERCENT * 7);    //target RPM low power (7*5 = 35%)
-const byte singleShotPulse = 25;                             //power pulse time for solenoid
+const byte singleShotPulse = 35;                             //power pulse time for solenoid
 const bool batteryPicture = true;                            //battery display mode
 
 const byte PROFILE_LOW = 0;
