@@ -18,6 +18,7 @@ const byte TRIG_PIN = 4;
 const byte ESC_PIN = 5;
 const byte MENU_PIN = 6;
 const byte SOLENOID_PIN = 7;
+const byte REV_PIN = 8;
 
 const byte MOTOR_POLES = 14;
 const unsigned int T0H_PULSE = 100;
