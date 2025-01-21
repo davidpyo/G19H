@@ -1,7 +1,8 @@
 To build: go to your Documents folder, C:\Users\USERNAME\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts and replace the font file with the one included in this repo
 
-For board use the ISP header and another arduino (I use an uno)
-Flash the bootloader first, then flash your firmware using flash using programmer
+For board use the ISP header and another arduino flashed with the ISP programmer see https://docs.arduino.cc/built-in-examples/arduino-isp/ArduinoISP/ (I use an uno)
+
+"Burn bootloader" first, then flash your firmware using "Flash using programmer"
 
 I know it's confusing, but the main branch here is Spirit + rev trigger code. 
 
