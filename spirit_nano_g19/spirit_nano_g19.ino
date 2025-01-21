@@ -2,55 +2,59 @@
 //SPIRIT
 //A brushless flywheel blaster
 //By wonderboy
-//Software revision 24.4.1
+//Software revision 25.1.8
 //FOR NANO
 
 #include <ClickButton.h>
 #include <Adafruit_SSD1306.h>
 #include <Servo.h>
 #include <Fonts/FreeSansBoldOblique24pt7b.h>
+#include <EEPROM.h>
 
-#define VOLT_PIN A0
-#define TACH_PIN_0 2
-#define TACH_PIN_1 3
-#define TRIG_PIN 4
-#define ESC_PIN 5
-#define MENU_PIN 6
-#define SOLENOID_PIN 7
-#define REV_PIN 8
+#define EEPROMOFFSET 0 //add 24 to this value if your EEPROM starts acting funky. max 1000
 
-#define MOTOR_POLES 14
-#define T0H_PULSE 100
-#define T1H_PULSE 400
-#define TL_PULSE 500
-#define OFF 1000
-#define FULL 2000
+const byte VOLT_PIN = A0;
+const byte TACH_PIN_0 = 2;
+const byte TACH_PIN_1 = 3;
+const byte TRIG_PIN = 4;
+const byte ESC_PIN = 5;
+const byte MENU_PIN = 6;
+const byte SOLENOID_PIN = 7;
+const byte REV_PIN = 8;
 
-#define RAMPWAIT 1000
-#define FAILTIME 1000
-#define BATTFREQ 5000
-#define SAFETYTIMEOUT 10000
-#define VOLTAGE_DIVIDER 0.164
+const byte MOTOR_POLES = 14;
+const unsigned int T0H_PULSE = 100;
+const unsigned int T1H_PULSE = 400;
+const unsigned int TL_PULSE = 500;
+const unsigned int OFF = 1000;
+const unsigned int FULL = 2000;
 
-#define MAXRPM 40000
-#define MINRPM 5000
-#define FIVEPERCENT 1750
+const unsigned int RAMPWAIT = 1000;
+const unsigned int FAILTIME = 1000;
+const unsigned int BATTFREQ = 5000;
+const unsigned int SAFETYTIMEOUT = 15000;
+const float VOLTAGE_DIVIDER = 0.164;
 
-#define MAXROFDELAY 35
-#define HIGHROFDELAY 65
-#define MINROFDELAY 215
+const unsigned int MAXRPM = 40000;
+const unsigned int MINRPM = 5000;
+const unsigned int FIVEPERCENT = 1750;
 
-#define SEMI 1
-#define AUTO 2
-#define BURST 3
-#define BINARY 4
-#define DEVOTION 5
-#define RAMPING 6
+const byte MAXFIRERATE = 16;
+const byte MINFIRERATE = 4;
+const byte MAXROFDELAY = 35;
+
+const byte SEMI = 1;
+const byte AUTO = 2;
+const byte REVERSE = 3;
+const byte BURST = 4;
+const byte BINARY = 5;
+const byte DEVOTION = 6;
+const byte RAMPING = 7;
+const byte RBURST = 8;
 
 //startup splash bitmap
 const unsigned char splash[] PROGMEM = {
-
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
@@ -116,44 +120,64 @@ const unsigned char splash[] PROGMEM = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
+const unsigned int HIGHPOWER = MINRPM + (FIVEPERCENT * 15);  //target RPM hi power (15*5 = 75%)
+const unsigned int MIDPOWER = MINRPM + (FIVEPERCENT * 11);   //target RPM med power (11*5 = 55%)
+const unsigned int LOWPOWER = MINRPM + (FIVEPERCENT * 7);    //target RPM low power (7*5 = 35%)
+const byte singleShotPulse = 25;                             //power pulse time for solenoid
+const bool batteryPicture = true;                            //battery display mode
+
+const byte PROFILE_LOW = 0;
+const byte PROFILE_MED = 1;
+const byte PROFILE_HIGH = 2;
+const byte PROFILE_T = 3;
+
+struct Profile {
+  unsigned int targetRPM;
+  byte burstCount;
+  byte fireRate;
+  unsigned int spinDownTime;
+};
+
+const Profile DEFAULT_PROFILES[4] PROGMEM = {
+  { HIGHPOWER, 3, 12, 500 },                 // Idle
+  { HIGHPOWER, 3, 12, 500 },                // Profile2
+  { HIGHPOWER, 3, 12, 500 },               //  Default
+  { HIGHPOWER + FIVEPERCENT, 3, 12, 500 }  // Tournament
+};
+
 Servo esc;                                         //ESC object
 ClickButton trig(TRIG_PIN, LOW, CLICKBTN_PULLUP);  //trigger button
 ClickButton rev(REV_PIN, LOW, CLICKBTN_PULLUP);    //rev button
 ClickButton menu(MENU_PIN, LOW, CLICKBTN_PULLUP);  //menu button
-//Adafruit_SSD1306 uView(128, 64, &SPI, 9, 8, 10);   //display
-Adafruit_SSD1306 uView(128, 64);  //display
+Adafruit_SSD1306 uView(128, 64);                   //display
 
-const long HIGHPOWER = MINRPM + (FIVEPERCENT * 15);  //target RPM hi power (15*5 = 75%)
-const long MIDPOWER = MINRPM + (FIVEPERCENT * 11);   //target RPM med power (11*5 = 55%)
-const long LOWPOWER = MINRPM + (FIVEPERCENT * 7);    //target RPM low power (7*5 = 35%)
-const byte singleShotPulse = 25;                     //power pulse time for solenoid
-const bool batteryPicture = true;                 //battery display mode
-const bool liveAmmoCounter = false;                  //when true, ammo counter will update after every shot. reduces fire rate when enabled due to display being slow
+byte currentProfile = PROFILE_HIGH;
+unsigned int targetRPM = HIGHPOWER;                                             //target RPM value
+byte fireRate = 10;                                                             //target fire rate (darts per second)
+byte singleShotDelay = ceil((1000 - (fireRate * singleShotPulse)) / fireRate);  //how long to wait after powering solenoid before it can be powered again
+byte mode = SEMI;                                                               //fire mode
+byte burstCount = 3;                                                            //how many shots to fire in burst mode
+unsigned int spinDownTime = 500;                                                //how long to wait before powering off flywheels after firing
 
-long targetRPM = HIGHPOWER;           //target RPM value
-byte singleShotDelay = MAXROFDELAY;  //how long to wait after powering solenoid before it can be powered again
-byte mode = SEMI;                     //fire mode
-byte burstCount = 3;                  //how many shots to fire in burst mode
-unsigned short spinDownTime = 500;    //how long to wait before powering off flywheels after firing
-
-unsigned short shotCount = 0;         //fired counter
-byte devotionCount = 0;               //devotion mode fired counter
-byte rampCount = 0;                   //ramping mode fired counter
-byte selected = 1;                    //menu selection
-bool revved = false;                  //flywheels spun up?
-bool settings = false;                //in settings mode?
-bool idle = false;                    //flywheels pre-rev/idle? (tournament mode)
-bool fired = false;                   //shot was fired? prevent additional shots until trigger reset (for all non fully-automatic fire modes)
-bool ramp = false;                    //ramped to full auto? (ramping mode)
-bool lock = false;                    //mode locked? when true, fire mode cannot be changed
-bool tourney = false;                 //when true, restrict available fire modes for competitive play
-bool lowBatt = false;                 //when true, low battery condition has been tripped. lock blaster for recharge
-bool updateDisplay = true;            //when true, write display buffer to screen in the next loop
-unsigned long spinDownTimer = 0;      //counts up while the flywheels are spinning down
-unsigned long lastRevTime = 0;        //stores timestamp of last revved
-unsigned long safetyTimer = 0;        //counts up while revving for safety shutoff
-unsigned long rampTime = 0;           //stores timestamp of last trigger pull in Ramping mode
-float voltage = 0.0;                  //numerical voltage
+unsigned int shotCount = 0;       //fired counter
+byte devotionCount = 0;           //devotion mode fired counter
+byte rampCount = 0;               //ramping mode fired counter
+byte selected = 1;                //menu selection
+bool revved = false;              //flywheels spun up?
+bool settings = false;            //in settings mode?
+bool idling = false;              //flywheels idling (state)?
+bool idle = false;                //idle mode
+bool fired = false;               //shot was fired? prevent additional shots until trigger reset (for all non fully-automatic fire modes)
+bool ramp = false;                //ramped to full auto? (ramping mode)
+bool lock = false;                //mode locked? when true, fire mode cannot be changed
+bool tourney = false;             //when true, restrict available fire modes for competitive play
+bool lowBatt = false;             //when true, low battery condition has been tripped. lock blaster for recharge
+bool updateDisplay = true;        //when true, write display buffer to screen in the next loop
+unsigned long spinDownTimer = 0;  //counts up while the flywheels are spinning down
+unsigned long lastRevTime = 0;    //stores timestamp of last revved
+unsigned long safetyTimer = 0;    //counts up while revving for safety shutoff
+unsigned long rampTime = 0;       //stores timestamp of last trigger pull in Ramping mode
+float voltage = 0.0;              //numerical voltage
 
 //tach stuff
 unsigned int speedSetpoint;
@@ -170,6 +194,34 @@ volatile unsigned long lastPulseTime0;
 volatile unsigned long lastPulseTime1;
 volatile boolean drive0TachValid = false;
 volatile boolean drive1TachValid = false;
+
+void loadProfile(byte profile) {
+  if (EEPROM.read(profile * sizeof(Profile) + EEPROMOFFSET) == 0xFF) {
+    Profile defaultProfile;
+    memcpy_P(&defaultProfile, &DEFAULT_PROFILES[profile], sizeof(Profile));
+    EEPROM.put(profile * sizeof(Profile) + EEPROMOFFSET, defaultProfile);
+  }
+
+  // Load profile from EEPROM
+  Profile loadedProfile;
+  EEPROM.get(profile * sizeof(Profile) + EEPROMOFFSET, loadedProfile);
+
+  // Apply settings
+  targetRPM = loadedProfile.targetRPM;
+  burstCount = loadedProfile.burstCount;
+  fireRate = loadedProfile.fireRate;
+  spinDownTime = loadedProfile.spinDownTime;
+}
+
+void saveCurrentProfile() {
+  Profile currentSettings = {
+    targetRPM,
+    burstCount,
+    fireRate,
+    spinDownTime
+  };
+  EEPROM.put(currentProfile * sizeof(Profile) + EEPROMOFFSET, currentSettings);
+}
 
 void setup() {
   //tach stuff
@@ -189,7 +241,6 @@ void setup() {
   trig.multiclickTime = 0;
   menu.multiclickTime = 0;
   rev.multiclickTime = 0;
-
   //startup animation
   uView.begin(SSD1306_SWITCHCAPVCC, 0x3C);
   uView.setRotation(2);
@@ -201,17 +252,19 @@ void setup() {
   uView.drawBitmap(0, 0, splash, 128, 64, 1);
   uView.setCursor(8, 40);
 
-  String str = "High Power";
+  String str = "Profile 1";
+  currentProfile = PROFILE_HIGH;
   if (digitalRead(MENU_PIN) == LOW) {
-    targetRPM = LOWPOWER;
-    str = "Low  Power";
+    currentProfile = PROFILE_LOW;
+    str = "Idle Pro";
+    idle = true;
   }
   if (digitalRead(TRIG_PIN) == LOW) {
-    if (targetRPM == HIGHPOWER) {
-      targetRPM = MIDPOWER;
-      str = "Mid  Power";
+    if (currentProfile == PROFILE_HIGH) {
+      currentProfile = PROFILE_MED;
+      str = "Profile 2";
     } else {
-      targetRPM = HIGHPOWER;
+      currentProfile = PROFILE_T;
       menu.longClickTime = 500;
       str = "Tournament";
       tourney = true;
@@ -219,17 +272,17 @@ void setup() {
     }
   }
 
+  loadProfile(currentProfile);
+
   uView.print(str);
   uView.display();
   uView.clearDisplay();
+  delay(1000);
 
   //initialize ESCs
   esc.attach(ESC_PIN, OFF, FULL);
   esc.writeMicroseconds(OFF);
-  for (byte i = 0; i < 4; i++) {
-    updateSpeed(tourney ? MINRPM : targetRPM, 10);
-    delay(200);
-  }
+  updateSpeed(idle ? MINRPM : targetRPM, 10);
 
   voltage = floor((analogRead(VOLT_PIN) * VOLTAGE_DIVIDER));
 }
@@ -257,7 +310,10 @@ void loop() {
         menu.clicks = 0;
         //update target RPM in case it was changed on settings screen
         if (!settings) {
+          idling = false; //reset this
+          saveCurrentProfile();
           updateSpeed(targetRPM, 10);
+          spinOff();
         }
       } else if (menu.clicks > 0 && !settings && !lock) {
         updateDisplay = true;
@@ -268,7 +324,7 @@ void loop() {
           rampTime = millis();
         }
 
-        if (mode > RAMPING) {
+        if (mode > RBURST) {
           mode = SEMI;
         }
       }
@@ -276,9 +332,9 @@ void loop() {
     } else {
       if (menu.clicks < 0) {
         updateDisplay = true;
-        if (mode == SEMI) {
-          mode = AUTO;
-        } else {
+        mode++;
+
+        if (mode > REVERSE) {
           mode = SEMI;
         }
       }
@@ -288,16 +344,16 @@ void loop() {
   //trigger button handling
   //if not in settings mode, while trigger is pressed, spin up the flywheels and fire
   if (!settings) {
-
-    if (rev.depressed) {
-        spinOn();
+    
+    if(rev.depressed){
+      spinOn();
     } else {
-        //if in tourney mode and flywheel speed set to idle RPM, spin up the flywheels for pre-rev
-        if (tourney && idle) {
-          esc.writeMicroseconds(FULL);
-        }
+      //if in idle mode and flywheel speed set to idle RPM, spin up the flywheels for pre-rev
+      if (idle && idling) {
+        esc.writeMicroseconds(FULL);
+      }
     }
-  
+    
     //make sure we haven't been revving for longer than the safety timeout and battery voltage is OK
     if (trig.depressed && !menu.depressed && safetyTimer < SAFETYTIMEOUT && !lowBatt) {
       spinOn();
@@ -307,33 +363,36 @@ void loop() {
           case BINARY:
             //fire once then set flag that prevents additional shots until trigger is released
             if (!fired) {
-              fireOnce();
+              fire(1);
               fired = true;
             }
             break;
           case BURST:
             if (!fired) {
-              //fireOnce executes burstCount times, firing a burst of burstCount darts
-              for (byte k = 0; k < burstCount; k++) {
-                fireOnce();
-              }
+              fire(burstCount);
               fired = true;
             }
             break;
           case AUTO:
           case DEVOTION:
-            fireOnce();
+            trig.Update();
+            if (trig.depressed) {
+              fire(1);
+            }
             break;
           case RAMPING:
             //semi auto behavior while rampCount < 3
             if (rampCount < 3 && !fired) {
-              fireOnce();
+              fire(1);
               rampCount++;
               fired = true;
               //switch to full auto if 3 shots are fired within RAMPWAIT milliseconds
             } else if (rampCount >= 3) {
               ramp = true;
-              fireOnce();
+              trig.Update();
+              if (trig.depressed) {
+                fire(1);
+              }
               rampTime = millis();
             }
 
@@ -343,12 +402,30 @@ void loop() {
               rampCount = 0;
             }
             break;
+          case REVERSE:
+          case RBURST:
+            //do nothing, but set the fired flag to cause a shot to be fired on trigger release
+            fired = true;
+            break;
         }
       }
     } else {
+
+      if (safetyTimer >= SAFETYTIMEOUT) {
+        spinOff();
+        while (trig.depressed) {
+          trig.Update();
+          delay(5);
+        }
+      }
+
       //if in binary or reverse mode, fire on trigger release
-      if ((mode == BINARY) && fired && revved) {
-        fireOnce();
+      if (fired && revved) {
+        if (mode == BINARY || mode == REVERSE) {
+          fire(1);
+        } else if (mode == RBURST) {
+          fire(burstCount);
+        }
       }
 
       //disable full auto ramping if wait period has elapsed, clear ramping counter
@@ -359,8 +436,10 @@ void loop() {
 
       devotionCount = 0;
       fired = false;
-      if (!rev.depressed){
-        spinOff();
+      if (millis() - spinDownTimer >= spinDownTime) {
+        if (!rev.depressed){
+          spinOff();
+        }
       }
       digitalWrite(SOLENOID_PIN, LOW);
     }
@@ -379,9 +458,9 @@ void loop() {
       voltage = floor((analogRead(VOLT_PIN) * VOLTAGE_DIVIDER));
     }
 
-    //write the display buffer if flag is set & only when not revving or if live ammo count is requested
+    //write the display buffer if flag is set & only when not revving
     //prevents screen write delay from affecting operation
-    if (updateDisplay && (!revved || liveAmmoCounter)) {
+    if (updateDisplay && !revved) {
       displayMain();
       updateDisplay = false;
     }
@@ -394,11 +473,37 @@ void loop() {
 
     //menu press switches selected parameter
     if (menu.clicks > 0) {
-      updateDisplay = true;
-      selected++;
-    }
-    if (selected > 4) {
-      selected = 1;
+      if (trig.depressed) {
+        // Reset current profile to defaults
+        Profile defaultProfile;
+        memcpy_P(&defaultProfile, &DEFAULT_PROFILES[currentProfile], sizeof(Profile));
+
+        // Apply default values
+        targetRPM = defaultProfile.targetRPM;
+        burstCount = defaultProfile.burstCount;
+        fireRate = defaultProfile.fireRate;
+        spinDownTime = defaultProfile.spinDownTime;
+
+        // Save to EEPROM
+        EEPROM.put(currentProfile * sizeof(Profile) + EEPROMOFFSET, defaultProfile);
+
+        // Visual feedback
+        uView.clearDisplay();
+        uView.setCursor(0, 28);
+        uView.print(F("Profile Reset!"));
+        uView.display();
+        delay(1000);  // Show message briefly
+
+        updateDisplay = true;
+        menu.clicks = 0;  // Clear the click so it doesn't change selection
+      } else {
+        updateDisplay = true;
+        selected++;
+
+        if (selected > 4) {
+          selected = 1;
+        }
+      }
     }
 
     //trigger press changes parameter value
@@ -418,10 +523,11 @@ void loop() {
           }
           break;
         case 3:
-          singleShotDelay -= 10;
-          if (singleShotDelay < MAXROFDELAY) {
-            singleShotDelay = MINROFDELAY;
+          fireRate += 1;
+          if (fireRate > MAXFIRERATE) {
+            fireRate = MINFIRERATE;
           }
+          singleShotDelay = ceil((1000 - (fireRate * singleShotPulse)) / fireRate);
           break;
         case 4:
           spinDownTime += 100;
@@ -443,34 +549,38 @@ void loop() {
 }
 
 //actuate the solenoid, and increment fired counter
-void fireOnce() {
-  digitalWrite(SOLENOID_PIN, HIGH);
-  delay(singleShotPulse);
-  digitalWrite(SOLENOID_PIN, LOW);
-  if (mode != DEVOTION) {
-    //reduce delay to minimum when in binary, semi, or ramping for best trigger response
-    delay((mode == BINARY || mode == SEMI || (mode == RAMPING && !ramp)) ? MAXROFDELAY : singleShotDelay);
-  } else {
-    if (devotionCount >= 10) {
-      delay(MAXROFDELAY);  //clamp to max ROF after 10 shots
+void fire(byte shots) {
+  for (byte k = 0; k < shots; k++) {
+    digitalWrite(SOLENOID_PIN, HIGH);
+    delay(singleShotPulse);
+    digitalWrite(SOLENOID_PIN, LOW);
+    if (mode != DEVOTION) {
+      //reduce delay to minimum when in binary, semi, or ramping for best trigger response
+      delay((mode == BINARY || mode == SEMI || (mode == RAMPING && !ramp) || mode == REVERSE) ? MAXROFDELAY : singleShotDelay);
     } else {
-      delay(165 + (0.5 * devotionCount * devotionCount) - (18 * devotionCount));  //polynomial fire rate ramping for Devotion mode
-      devotionCount++;
+      if (devotionCount >= 10) {
+        delay(MAXROFDELAY);  //clamp to max ROF after 10 shots
+      } else {
+        delay(165 + (0.5 * devotionCount * devotionCount) - (18 * devotionCount));  //polynomial fire rate ramping for Devotion mode
+        devotionCount++;
+      }
     }
   }
-  shotCount++;
+  shotCount += shots;
   updateDisplay = true;
 }
 
 //spin up the flywheels, delay activities for set period to allow flywheels to accelerate. reset the spin down timer (thanks snakerbot!)
 void spinOn() {
-  //if in tourney mode and flywheel speed set to idle RPM, first update the targetRPM to the actual RPM
-  if (tourney && idle) {
-    idle = false;
+  //if in idle mode and flywheel speed set to idle RPM, first update the targetRPM to the actual RPM
+  if (idle && idling) {
+    idling = false;
     updateSpeed(targetRPM, 1);
   }
   if (!revved) {
-    enableTachInterrupts();
+    cli();
+    EIMSK = 0b00000011;  //INT0 and INT1 on
+    sei();
     esc.writeMicroseconds(FULL);
     //Record trigger down event timestamp
     long lastTriggerDown = millis();
@@ -512,8 +622,10 @@ void spinOn() {
         }
         goodTachCount = 0;
       } else {
+        cli();
+        EIMSK = 0b00000000;  //INT0 and INT1 off
+        sei();
         revved = true;  //say it's ready to fire, close everything out so it'll go to the fire control code
-        disableTachInterrupts();
         spinDownTimer = millis();
         safetyTimer = millis() - lastRevTime;
       }
@@ -524,26 +636,26 @@ void spinOn() {
   }
 }
 
-//cut power to the flywheels, but only after a set time
+//cut power to the flywheels
 void spinOff() {
-  if (millis() - spinDownTimer >= spinDownTime) {
-    //if in tournament mode and flywheel speed is not at idle RPM, set flywheel speed to idle RPM
-    if (tourney && !idle) {
-      idle = true;
-      updateSpeed(MINRPM, 1);
-    }
-    //only if not in tournament mode, shut off the flywheels
-    if (!tourney) {
+  //if in idle mode and flywheel speed is not at idle RPM, set flywheel speed to idle RPM
+  if (idle && !idling) {
+    idling = true;
+    updateSpeed(MINRPM, 1);
+  } else { //only if not in idle mode, shut off the flywheels
+    if(!idle){
       esc.writeMicroseconds(OFF);
     }
-    revved = false;
-    lastRevTime = millis();
-    goodTachCount = 0;
-    safetyTimer = 0;
-    drive0TachValid = false;
-    drive1TachValid = false;
-    disableTachInterrupts();
   }
+  revved = false;
+  lastRevTime = millis();
+  safetyTimer = 0;
+  goodTachCount = 0;
+  drive0TachValid = false;
+  drive1TachValid = false;
+  cli();
+  EIMSK = 0b00000000;  //INT0 and INT1 off
+  sei();
 }
 
 //main (firing) screen display output
@@ -577,7 +689,7 @@ void displayMain() {
     if (shotCount > 99) {
       countH -= 14;
     }
-    uView.setCursor(countH, 48);
+    uView.setCursor(countH, 47);
     uView.print(shotCount);
   } else {
     uView.setCursor(0, 26);
@@ -586,7 +698,7 @@ void displayMain() {
 
   countH = 117;
   uView.setFont();
-  uView.drawFastHLine(0, 54, 128, 1);
+  uView.drawFastHLine(0, 53, 128, 1);
   if (lowBatt) {
     throttle = 0;
   }
@@ -596,10 +708,10 @@ void displayMain() {
   if (throttle > 99) {
     countH -= 6;
   }
-  uView.setCursor(countH, 57);
+  uView.setCursor(countH, 56);
   uView.print(throttle);
   uView.print(F("%"));
-  uView.setCursor(0, 57);
+  uView.setCursor(0, 56);
 
   if (!lowBatt) {
     switch (mode) {
@@ -620,6 +732,12 @@ void displayMain() {
         break;
       case RAMPING:
         uView.print(F("Ramping"));
+        break;
+      case REVERSE:
+        uView.print(F("Reverse"));
+        break;
+      case RBURST:
+        uView.print(F("R.Burst"));
         break;
     }
     if (lock) {
@@ -643,7 +761,6 @@ void displaySettings(byte selected) {
   byte seconds = t;
 
   byte throttle = map(targetRPM, MINRPM, MAXRPM, 0, 100);
-  byte fireRate = singleShotDelay + singleShotPulse;
 
   uView.clearDisplay();
   uView.setCursor(0, 0);
@@ -677,7 +794,7 @@ void displaySettings(byte selected) {
   uView.print(burstCount);
   uView.setTextColor(1, 0);
   uView.setCursor(0, 39);
-  uView.print(F("Fire Rate (ms): "));
+  uView.print(F("Fire Rate: "));
   uView.setCursor(96, 39);
   if (selected == 3) {
     uView.setTextColor(0, 1);
@@ -890,18 +1007,6 @@ void bDead() {
   uView.drawPixel(114, 2, 1);
   uView.drawPixel(114, 3, 1);
   uView.drawPixel(114, 5, 1);
-}
-
-void enableTachInterrupts() {
-  cli();
-  EIMSK = 0b00000011;  //INT0 and INT1 on
-  sei();
-}
-
-void disableTachInterrupts() {
-  cli();
-  EIMSK = 0b00000000;  //INT0 and INT1 off
-  sei();
 }
 
 //tach ISRs
