@@ -1,5 +1,6 @@
 To build: 
-    
+
+    Get needed libraries from arduino library manager
     Go to your Documents folder, C:\Users\USERNAME\Documents\Arduino\libraries\Adafruit_GFX_Library\Fonts and replace the font file with the one included in this repo
     For board use the ISP header and another arduino flashed with the ISP programmer see https://docs.arduino.cc/built-in-examples/arduino-isp/ArduinoISP/ (I use an uno)
     "Burn bootloader" first, then flash your firmware using "Flash using programmer"
