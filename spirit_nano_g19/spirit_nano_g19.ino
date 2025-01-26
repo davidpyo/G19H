@@ -211,6 +211,7 @@ void loadProfile(byte profile) {
   burstCount = loadedProfile.burstCount;
   fireRate = loadedProfile.fireRate;
   spinDownTime = loadedProfile.spinDownTime;
+  singleShotDelay = ceil((1000 - (fireRate * singleShotPulse)) / fireRate); 
 }
 
 void saveCurrentProfile() {
