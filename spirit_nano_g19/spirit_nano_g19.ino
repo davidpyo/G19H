@@ -553,7 +553,7 @@ void loop() {
 void fire(byte shots) {
   for (byte k = 0; k < shots; k++) {
     digitalWrite(SOLENOID_PIN, HIGH);
-    delay(singleShotPulse);
+    delay(singleShotPulse + ((abs(analogRead(VOLT_PIN) - 960))/30));
     digitalWrite(SOLENOID_PIN, LOW);
     if (mode != DEVOTION) {
       //reduce delay to minimum when in binary, semi, or ramping for best trigger response
